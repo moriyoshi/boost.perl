@@ -7,7 +7,7 @@ require Exporter;
 require DynaLoader;
 
 @ISA = qw(Exporter DynaLoader);
-@EXPORT = qw(test1 test2);
+@EXPORT = qw(test1 test2 test3 test4);
 
 $VERSION = '0.0.0';
 

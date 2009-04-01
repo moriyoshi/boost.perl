@@ -1,9 +1,19 @@
 use strict;
-use Acme::Mozo::QuickXS qw(test1 test2);
+use Acme::Mozo::QuickXS qw(test1 test2 test3 test4);
 
-sub add { $_[0] + $_[1] }
+sub add {
+    my $retval = 0;
+    $retval += $_ foreach (@_);
+    $retval;
+}
 
-print "1..2\n";
+sub tuple {
+    ($_[0], $_[0] + 1, $_[0] + 2);
+}
 
-test1(1, 2);
-test2("abc");
+print "1..10\n";
+
+test1();
+test2();
+test3();
+test4();

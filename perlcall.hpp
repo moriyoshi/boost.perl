@@ -7,6 +7,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <boost/assert.hpp>
+#include <boost/format.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/repetition/repeat.hpp>
@@ -21,25 +22,37 @@
 
 namespace perl {
 
-class value {
-public:
-    value(tTHX interp, SV* impl, bool inc_ref = false);
+template<typename T_, typename Timpl_>
+struct value_base {
+    value_base(tTHX interp, Timpl_* impl, bool inc_ref = false)
+            : aTHX(interp), impl_(impl) {
+        if (inc_ref)
+            SvREFCNT_inc(impl_);
+    }
 
-    value(tTHX interp, AV* impl, bool inc_ref = false);
-
-    value(tTHX interp, HV* impl, bool inc_ref = false);
-
-    value(tTHX interp, GV* impl, bool inc_ref = false);
-
-    value(tTHX interp, IO* impl, bool inc_ref = false);
-
-    value(value const& that): aTHX(that.aTHX), impl_(that.impl_) {
+    value_base(value_base const& that): aTHX(that.aTHX), impl_(that.impl_) {
         SvREFCNT_inc(impl_);
     }
 
-    ~value() {
+    ~value_base() {
         SvREFCNT_dec(impl_);
     }
+
+    tTHX interpreter() const;
+protected:
+    tTHX aTHX;
+    Timpl_* impl_;
+};
+
+class value: public value_base<value, SV> {
+public:
+    typedef value_base<value, SV> base_type;
+
+public:
+    value(tTHX aTHX, SV* impl, bool inc_ref = false)
+            : base_type(aTHX, impl, inc_ref) {}
+
+    value(value const& that): base_type(that) {}
 
     value clone() const;
 
@@ -55,6 +68,82 @@ public:
         STRLEN len;
         char const* ptr = SvPV_const(impl_, len);
         return std::string(ptr, len);
+    }
+
+#define DEF_BINARY_OPERATOR(op, op_fun) \
+    value op(value const& rhs) const { \
+        dSP; \
+        ENTER; \
+        SAVETMPS; \
+        PUSHMARK(SP); \
+        EXTEND(SP, 2); \
+        PUSHs(impl_); \
+        PUSHs(rhs.impl_); \
+        PUTBACK; \
+        op_fun(); \
+        SPAGAIN; \
+        value retval(aTHX, newSVsv(POPs), false); \
+        PUTBACK; \
+        FREETMPS; \
+        LEAVE; \
+        return retval; \
+    }
+
+    DEF_BINARY_OPERATOR(operator==, pp_eq)
+
+    DEF_BINARY_OPERATOR(operator!=, pp_ne)
+
+    DEF_BINARY_OPERATOR(operator>=, pp_ge)
+
+    DEF_BINARY_OPERATOR(operator>, pp_gt)
+
+    DEF_BINARY_OPERATOR(operator<=, pp_le)
+
+    DEF_BINARY_OPERATOR(operator<, pp_lt)
+
+    DEF_BINARY_OPERATOR(operator+, pp_add)
+
+    DEF_BINARY_OPERATOR(operator-, pp_subtract)
+
+    DEF_BINARY_OPERATOR(operator*, pp_multiply)
+
+    DEF_BINARY_OPERATOR(operator/, pp_divide)
+
+    bool eq(value const& rhs) const {
+        return sv_eq(impl_, rhs.impl_);
+    }
+
+    bool ne(value const& rhs) const {
+        return !sv_eq(impl_, rhs.impl_);
+    }
+
+    value const& operator++() {
+        sv_inc(impl_); return *this;
+    }
+
+    value operator++(int) {
+        value retval(clone());
+        sv_inc(impl_);
+        return retval;
+    }
+
+    value const& operator--() {
+        sv_dec(impl_);
+        return *this;
+    }
+
+    value operator--(int) {
+        value retval(clone());
+        sv_dec(impl_);
+        return retval;
+    }
+
+    bool operator!() {
+        return !static_cast<bool>(*this);
+    }
+
+    operator bool() const {
+        return SvTRUE(impl_);
     }
 
     operator IV() const {
@@ -73,13 +162,13 @@ public:
         return impl_;
     }
 
+    bool tainted() const {
+        return SvTAINTED(impl_);
+    }
+
     const char* c_str() const {
         return SvPVx_nolen_const(impl_);
     }
-
-protected:
-    tTHX aTHX;
-    SV* impl_;
 };
 
 class integer: public value {
@@ -125,28 +214,92 @@ public:
     }
 };
 
-class array: public value {
+class array: public value_base<array, AV> {
+public:
+    typedef value_base<array, AV> base_type;
+
 public:
     array(tTHX aTHX)
-        : value(aTHX, newAV()) {}
+        : base_type(aTHX, newAV()) {}
 
     array(tTHX aTHX, AV* val, bool inc_ref = false)
-        : value(aTHX, val, inc_ref) {}
+        : base_type(aTHX, val, inc_ref) {}
 
-    void push(value const& v)
-    {
+    array(array const& that): base_type(that) {}
+
+
+    std::size_t size() {
+        return av_len(impl_) + 1;
+    }
+
+    void push(value const& v) {
         av_push(reinterpret_cast<AV*>(impl_), SvREFCNT_inc(v));
     }
 
+    value get(I32 idx) const {
+        SV** retval = av_fetch(impl_, idx, 0);
+        if (!retval) {
+            throw new std::range_error(
+                    (boost::format("Index out of range: %d") %  idx).str());
+        }
+        return value(aTHX, *retval, true);
+    }
+
     value operator[](I32 idx) {
-        return value(aTHX, *av_fetch(reinterpret_cast<AV*>(impl_), idx, 0), true);
+        return value(aTHX, *av_fetch(impl_, idx, 1), true);
     }
 };
 
-class stream: public value {
+class hashtable: public value_base<hashtable, HV> {
+public:
+    typedef value_base<hashtable, HV> base_type;
+public:
+    hashtable(tTHX aTHX)
+        : base_type(aTHX, newHV()) {}
+
+    hashtable(tTHX aTHX, HV* val, bool inc_ref = false)
+        : base_type(aTHX, val, inc_ref) {}
+
+    hashtable(hashtable const& that): base_type(that) {}
+
+    value get(value key) const {
+        SV** retval = reinterpret_cast<SV**>(hv_common(impl_, key, NULL, 0, 0,
+                    HV_FETCH_JUST_SV, NULL, 0));
+        if (!retval) {
+            throw new std::range_error(
+                    (boost::format("Key not found: %s") % key.c_str()).str());
+        }
+        return value(aTHX, *retval, true);
+    }
+
+    value operator[](value key) {
+        SV** retval = reinterpret_cast<SV**>(hv_common(impl_, key, NULL, 0, 0,
+                    HV_FETCH_JUST_SV | HV_FETCH_LVALUE, NULL, 0));
+        BOOST_ASSERT(retval);
+        return value(aTHX, *retval, true);
+    }
+};
+
+class symbol: public value_base<symbol, GV> {
+public:
+    typedef value_base<symbol, GV> base_type;
+
+public:
+    symbol(tTHX aTHX, GV* _gv, bool inc_ref = false)
+        : base_type(aTHX, _gv, inc_ref) {}
+
+    symbol(symbol const& that): base_type(that) {} 
+};
+
+class stream: public value_base<stream, IO> {
+public:
+    typedef value_base<stream, IO> base_type;
+
 public:
     stream(tTHX aTHX, IO* _io, bool inc_ref = false)
-        : value(aTHX, _io, inc_ref) {}
+        : base_type(aTHX, _io, inc_ref) {}
+
+    stream(stream const& that): base_type(that) {} 
 
     operator PerlIO*() const {
         return IoOFP(impl_);
@@ -234,6 +387,7 @@ protected:
 };
 
 
+template<typename Tretval_>
 class function;
 
 class interpreter {
@@ -250,20 +404,20 @@ public:
         return perl::value(*this, impl, inc_ref);
     }
 
-    perl::value value(AV* impl, bool inc_ref) const {
-        return perl::value(*this, impl, inc_ref);
+    perl::array value(AV* impl, bool inc_ref) const {
+        return perl::array(*this, impl, inc_ref);
     }
 
-    perl::value value(HV* impl, bool inc_ref) const {
-        return perl::value(*this, impl, inc_ref);
+    perl::hashtable value(HV* impl, bool inc_ref) const {
+        return perl::hashtable(*this, impl, inc_ref);
     }
 
-    perl::value value(GV* impl, bool inc_ref) const {
-        return perl::value(*this, impl, inc_ref);
+    perl::symbol value(GV* impl, bool inc_ref) const {
+        return perl::symbol(*this, impl, inc_ref);
     }
 
-    perl::value value(IO* impl, bool inc_ref) const {
-        return perl::value(*this, impl, inc_ref);
+    perl::stream value(IO* impl, bool inc_ref) const {
+        return perl::stream(*this, impl, inc_ref);
     }
 
     perl::string value(perl::string const& val) const {
@@ -322,11 +476,14 @@ public:
         return perl::array(*this);
     }
 
-    perl::function function(perl::value name, I32 flags = 0) const;
+    template<typename Tretval_>
+    perl::function<Tretval_> function(perl::value name) const;
 
-    perl::function function(std::pair<char const*, char const*> const& name, I32 flags = 0) const;
+    template<typename Tretval_>
+    perl::function<Tretval_> function(std::pair<char const*, char const*> const& name) const;
 
-    perl::function function(char const* name, I32 flags = 0) const;
+    template<typename Tretval_>
+    perl::function<Tretval_> function(char const* name) const;
 
     operator tTHX() const {
         return aTHX;
@@ -336,53 +493,135 @@ protected:
     tTHX aTHX;
 };
 
-struct retval_converter {
+template<typename Tretval_>
+class retval_converter {
+public:
+    typedef Tretval_ result_type;
+
+public:
     virtual ~retval_converter() {}
 
-    virtual value operator()(tTHX, SV**, I32) const = 0;
+    virtual I32 flags() const = 0;
+
+    virtual Tretval_ operator()(tTHX, SV**, I32) const = 0;
 };
 
 namespace detail {
     template<typename Tretval_>
-    struct retval_converter_impl: public retval_converter {
-        typedef Tretval_ result_type;
+    struct retval_converter_impl: public retval_converter<Tretval_> {};
+
+    template<>
+    struct retval_converter_impl<IV>: public retval_converter<IV> {
+        typedef IV result_type;
 
         virtual ~retval_converter_impl() {}
 
-        virtual value operator()(pTHX_ SV** SP, I32 count) const {
-            value retval(aTHX, POPs, true);
-            return static_cast<Tretval_>(retval);
+        virtual I32 flags() const {
+            return 0;
+        }
+
+        virtual IV operator()(pTHX_ SV** SP, I32 count) const {
+            return POPi;
         }
     };
 
     template<>
-    struct retval_converter_impl<array>: public retval_converter {
+    struct retval_converter_impl<UV>: public retval_converter<UV> {
+        typedef UV result_type;
+
+        virtual ~retval_converter_impl() {}
+
+        virtual I32 flags() const {
+            return 0;
+        }
+
+        virtual UV operator()(pTHX_ SV** SP, I32 count) const {
+            return POPu;
+        }
+    };
+
+    template<>
+    struct retval_converter_impl<NV>: public retval_converter<NV> {
+        typedef NV result_type;
+
+        virtual ~retval_converter_impl() {}
+
+        virtual I32 flags() const {
+            return 0;
+        }
+
+        virtual NV operator()(pTHX_ SV** SP, I32 count) const {
+            return POPn;
+        }
+    };
+
+    template<>
+    struct retval_converter_impl<std::string>: public retval_converter<std::string> {
+        typedef std::string result_type;
+
+        virtual ~retval_converter_impl() {}
+
+        virtual I32 flags() const {
+            return 0;
+        }
+
+        virtual std::string operator()(pTHX_ SV** SP, I32 count) const {
+            STRLEN len;
+            char const* ptr = SvPVx(POPs, len);
+            return std::string(ptr, len);
+        }
+    };
+
+    template<>
+    struct retval_converter_impl<value>: public retval_converter<value> {
+        typedef value result_type;
+
+        virtual ~retval_converter_impl() {}
+
+        virtual I32 flags() const {
+            return 0;
+        }
+
+        virtual value operator()(pTHX_ SV** SP, I32 count) const {
+            return value(aTHX, POPs, true);
+        }
+    };
+
+    template<>
+    struct retval_converter_impl<array>: public retval_converter<array> {
         typedef array result_type;
 
         virtual ~retval_converter_impl() {}
 
-        virtual value operator()(pTHX_ SV** SP, I32 count) const {
+        virtual I32 flags() const {
+            return G_ARRAY;
+        }
+
+        virtual array operator()(pTHX_ SV** SP, I32 count) const {
             array retval(aTHX); \
+            SP -= count - 1;
             for (int i = 0; i < count; ++i) {
-                retval.push(value(aTHX, POPs));
+                retval.push(value(aTHX, newSVsv(SP[i])));
             }
             return retval;
         }
-    private:
     };
-}
+} // namespace detail
 
 template<typename T_>
-inline retval_converter const& get_retval_converter()
-{
+inline retval_converter<T_> const& get_retval_converter() {
     static detail::retval_converter_impl<T_> impl_;
     return impl_;
 }
 
+template<typename Tretval_ = value>
 class function {
 public:
-    function(value fun, I32 flags = 0, retval_converter const& conv = get_retval_converter<value>())
-        : fun_(fun), flags_(flags), conv_(conv) {}
+    typedef Tretval_ result_type;
+
+public:
+    function(value fun, retval_converter<Tretval_> const& conv = get_retval_converter<Tretval_>())
+        : fun_(fun), conv_(conv) {}
 
 #define ACME_MOZO_PERL_ARG_PUSH_TEMPLATE(__z__, __n__, __arg__) \
     PUSHs(interpreter(aTHX).value(BOOST_PP_CAT(__arg__, __n__)).mortal());
@@ -390,20 +629,22 @@ public:
 #define ACME_MOZO_PERL_BODY_PROLOGUE_TEMPLATE \
         pTHX(fun_.interpreter()); \
         dSP; \
-        ENTER;
+        ENTER; \
+        SAVETMPS;
 
 #define ACME_MOZO_PERL_BODY_DO_CALL_TEMPLATE { \
-        int count = call_sv(fun_, flags_); \
+        int count = call_sv(fun_, conv_.flags()); \
         SPAGAIN; \
-        value retval(conv_(aTHX, SP, count)); \
+        result_type retval(conv_(aTHX, SP, count)); \
         PUTBACK; \
+        FREETMPS; \
         LEAVE; \
         return retval; \
     }
 
 #define ACME_MOZO_PERL_BODY_TEMPLATE(__z__, __n__, __arg__) \
     template<BOOST_PP_ENUM_PARAMS(__n__, typename T)> \
-    value operator()(BOOST_PP_ENUM_BINARY_PARAMS(__n__, T, a)) { \
+    result_type operator()(BOOST_PP_ENUM_BINARY_PARAMS(__n__, T, a)) { \
         ACME_MOZO_PERL_BODY_PROLOGUE_TEMPLATE \
         PUSHMARK(SP); \
         EXTEND(SP, __n__); \
@@ -412,7 +653,7 @@ public:
         ACME_MOZO_PERL_BODY_DO_CALL_TEMPLATE \
     }
 
-    value operator()() {
+    result_type operator()() {
         ACME_MOZO_PERL_BODY_PROLOGUE_TEMPLATE
         ACME_MOZO_PERL_BODY_DO_CALL_TEMPLATE
     }
@@ -426,40 +667,9 @@ public:
 
 private:
     value fun_;
-    const I32 flags_;
-    retval_converter const& conv_;
+    retval_converter<Tretval_> const& conv_;
 };
 
-
-inline value::value(tTHX interp, SV* impl, bool inc_ref)
-        : aTHX(interp), impl_(impl) {
-    if (inc_ref)
-        SvREFCNT_inc(impl_);
-}
-
-inline value::value(tTHX interp, AV* impl, bool inc_ref)
-        : aTHX(interp), impl_(reinterpret_cast<SV*>(impl)) {
-    if (inc_ref)
-        SvREFCNT_inc(impl_);
-}
-
-inline value::value(tTHX interp, HV* impl, bool inc_ref)
-        : aTHX(interp), impl_(reinterpret_cast<SV*>(impl)) {
-    if (inc_ref)
-        SvREFCNT_inc(impl_);
-}
-
-inline value::value(tTHX interp, GV* impl, bool inc_ref)
-        : aTHX(interp), impl_(reinterpret_cast<SV*>(impl)) {
-    if (inc_ref)
-        SvREFCNT_inc(impl_);
-}
-
-inline value::value(tTHX interp, IO* impl, bool inc_ref)
-        : aTHX(interp), impl_(reinterpret_cast<SV*>(impl)) {
-    if (inc_ref)
-        SvREFCNT_inc(impl_);
-}
 
 inline tTHX value::interpreter() const {
     return aTHX;
@@ -475,19 +685,27 @@ inline value value::clone() const {
     return value(aTHX, newSVsv(impl_));
 }
 
-inline perl::function interpreter::function(perl::value name, I32 flags) const {
-    return perl::function(name, flags);
+template<typename Tretval_>
+inline perl::function<Tretval_>
+interpreter::function(perl::value name) const {
+    return perl::function<Tretval_>(name);
 }
 
-inline perl::function interpreter::function(std::pair<char const*, char const*> const& name, I32 flags) const {
+template<typename Tretval_>
+inline perl::function<Tretval_>
+interpreter::function(std::pair<char const*, char const*> const& name) const {
     load_module(PERL_LOADMOD_NOIMPORT, newSVpv(name.first, 0), 0, 0, 0);
     HV* stash = gv_stashpv(name.first, 0);
-    perl::value fun(*this, gv_fetchmethod(stash, name.second), true);
-    return perl::function(fun, flags);
+    perl::value fun(*this,
+            reinterpret_cast<SV*>(gv_fetchmethod(stash, name.second)),
+            true);
+    return perl::function<Tretval_>(fun);
 }
 
-inline perl::function interpreter::function(char const* name, I32 flags) const {
-    return perl::function(value(name), flags);
+template<typename Tretval_>
+inline perl::function<Tretval_>
+interpreter::function(char const* name) const {
+    return perl::function<Tretval_>(value(name));
 }
 
 } // namespace perl
