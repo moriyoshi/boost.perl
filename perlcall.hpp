@@ -340,42 +340,36 @@ struct perlio_streambuf: public std::basic_streambuf<char>
         return PerlIO_get_cnt(io_);
     }
 
-    virtual std::streamsize xsgetn(char_type* s, std::streamsize n)
-    {
+    virtual std::streamsize xsgetn(char_type* s, std::streamsize n) {
         SSize_t retval = PerlIO_read(io_, s, n);
         if (retval < 0)
             throw std::ios_base::failure(strerror(PerlIO_error(io_)));
         return retval;
     }
 
-    virtual int_type underflow()
-    {
+    virtual int_type underflow() {
         return PerlIO_eof(io_);
     }
 
-    virtual int_type uflow()
-    {
+    virtual int_type uflow() {
         int retval = PerlIO_getc(io_);
         return retval == EOF ? traits_type::eof(): retval;
     }
 
-    virtual int_type pbackfail(int_type c = traits_type::eof())
-    {
+    virtual int_type pbackfail(int_type c = traits_type::eof()) {
         if (PerlIO_putc(io_, c))
             return traits_type::eof();
         return 0;
     }
 
-    virtual std::streamsize xsputn(const char_type* s, std::streamsize n)
-    {
+    virtual std::streamsize xsputn(const char_type* s, std::streamsize n) {
         SSize_t retval = PerlIO_write(io_, s, n);
         if (retval < 0)
             throw std::ios_base::failure(strerror(PerlIO_error(io_)));
         return retval;
     }
 
-    virtual int_type overflow(int_type c = traits_type::eof())
-    {
+    virtual int_type overflow(int_type c = traits_type::eof()) {
         if (PerlIO_putc(io_, c) == 0)
             return traits_type::eof();
         return 0;
