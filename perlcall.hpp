@@ -392,12 +392,11 @@ class function;
 
 class interpreter {
 public:
-    interpreter(tTHX impl): aTHX(impl) {}
+    interpreter(tTHX impl):
+        aTHX(impl), stdout_(aTHX_ PerlIO_stdout()), cout_(&stdout_) {}
 
     std::ostream& cout() {
-        static perlio_streambuf stdout(aTHX_ PerlIO_stdout());
-        static std::ostream retval(&stdout);
-        return retval;
+        return cout_;
     }
 
     perl::value value(SV* impl, bool inc_ref) const {
@@ -491,6 +490,8 @@ public:
 
 protected:
     tTHX aTHX;
+    perlio_streambuf stdout_;
+    std::ostream cout_;
 };
 
 template<typename Tretval_>
