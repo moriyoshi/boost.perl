@@ -689,7 +689,7 @@ interpreter::function(perl::value name) const {
 template<typename Tretval_>
 inline perl::function<Tretval_>
 interpreter::function(std::pair<char const*, char const*> const& name) const {
-    load_module(PERL_LOADMOD_NOIMPORT, newSVpv(name.first, 0), 0, 0, 0);
+    load_module(PERL_LOADMOD_NOIMPORT, sv_2mortal(newSVpv(name.first, 0)), 0, 0, 0);
     HV* stash = gv_stashpv(name.first, 0);
     perl::value fun(*this,
             reinterpret_cast<SV*>(gv_fetchmethod(stash, name.second)),
