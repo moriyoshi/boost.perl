@@ -1,4 +1,4 @@
-package Acme::Mozo::QuickXS;
+package Cxxs::Test;
 
 use strict;
 use vars qw(@ISA @EXPORT $VERSION);
@@ -11,5 +11,5 @@ require DynaLoader;
 
 $VERSION = '0.0.0';
 
-bootstrap Acme::Mozo::QuickXS;
+bootstrap Cxxs::Test;
 1;

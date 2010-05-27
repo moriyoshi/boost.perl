@@ -1,5 +1,5 @@
 use strict;
-use Acme::Mozo::QuickXS qw(test1 test2 test3 test4);
+use Cxxs::Test qw(test1 test2 test3 test4);
 
 sub add {
     my $retval = 0;
