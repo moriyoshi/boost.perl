@@ -15,21 +15,54 @@
 #include <EXTERN.h>
 #include <perl.h>
 
+#include "cxxs/config.hpp"
 #include "cxxs/interpreter.hpp"
 #include "cxxs/from_perl_converter.hpp"
 
-#define CXXS_MAX_ARITY 64
-
 namespace cxxs {
+
+template<typename T_>
+class return_value_handler {
+public:
+    typedef T_ result_type;
+
+public:
+    static const I32 flags = 0;
+
+    static T_ apply(pTHX_ SV** SP, I32) {
+        char storage[sizeof(T_)];
+        from_perl_converter<T_, SV>::apply(aTHX_ storage, POPs);
+        return return_storage<T_>(storage);
+    }
+};
+
+template<>
+struct return_value_handler<array> {
+    typedef array result_type;
+
+    static const I32 flags = G_ARRAY;
+
+    static array apply(pTHX_ SV** SP, I32 count) {
+        array retval(aTHX);
+        SP -= count - 1;
+        for (int i = 0; i < count; ++i) {
+            retval.push(value(aTHX_ newSVsv(SP[i])));
+        }
+        return retval;
+    }
+};
 
 template<typename Tretval_ = value>
 class function {
 public:
     typedef Tretval_ result_type;
 
+private:
+    typedef return_value_handler<Tretval_> return_value_handler_type;
+
 public:
-    function(value fun, from_perl_converter<Tretval_> const& conv = get_from_perl_converter<Tretval_>())
-        : fun_(fun), conv_(conv) {}
+    function(value fun)
+        : fun_(fun) {}
 
 #define CXXS_ARG_PUSH_TEMPLATE(__z__, __n__, __arg__) \
     PUSHs(interpreter(aTHX).value(BOOST_PP_CAT(__arg__, __n__)).mortal());
@@ -41,9 +74,9 @@ public:
         SAVETMPS;
 
 #define CXXS_BODY_DO_CALL_TEMPLATE { \
-        int count = call_sv(fun_, conv_.flags()); \
+        int count = call_sv(fun_, return_value_handler_type::flags); \
         SPAGAIN; \
-        result_type retval(conv_(aTHX, SP, count)); \
+        result_type retval(return_value_handler_type::apply(aTHX_ SP, count)); \
         PUTBACK; \
         FREETMPS; \
         LEAVE; \
@@ -66,7 +99,7 @@ public:
         CXXS_BODY_DO_CALL_TEMPLATE
     }
 
-    BOOST_PP_REPEAT_FROM_TO(1, CXXS_MAX_ARITY, CXXS_BODY_TEMPLATE, -)
+    BOOST_PP_REPEAT_FROM_TO(1, CXXS_PERL_CALL_MAX_ARITY, CXXS_BODY_TEMPLATE, -)
 
 #undef CXXS_ARG_PUSH_TEMPLATE
 #undef CXXS_BODY_PROLOGUE_TEMPLATE
@@ -75,7 +108,6 @@ public:
 
 private:
     value fun_;
-    from_perl_converter<Tretval_> const& conv_;
 };
 
 } // namespace cxxs

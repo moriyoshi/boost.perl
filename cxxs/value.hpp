@@ -16,8 +16,8 @@ public:
     typedef value_base<value, SV> base_type;
 
 public:
-    value(tTHX aTHX, SV* impl, bool inc_ref = false)
-            : base_type(aTHX, impl, inc_ref) {}
+    value(pTHX_ SV* impl, bool inc_ref = false)
+            : base_type(aTHX_ impl, inc_ref) {}
 
     value(value const& that): base_type(that) {}
 
@@ -29,7 +29,9 @@ public:
         return SvTYPE(impl_);
     } 
 
+#ifdef PERL_IMPLICIT_CONTEXT
     tTHX interpreter() const;
+#endif
 
     operator std::string() const {
         STRLEN len;
@@ -49,7 +51,7 @@ public:
         PUTBACK; \
         op_fun(); \
         SPAGAIN; \
-        value retval(aTHX, newSVsv(POPs), false); \
+        value retval(aTHX_ newSVsv(POPs), false); \
         PUTBACK; \
         FREETMPS; \
         LEAVE; \
@@ -140,34 +142,34 @@ public:
 
 class integer: public value {
 public:
-    integer(tTHX aTHX, IV val = 0)
-        : value(aTHX, newSViv(val)) {}
+    integer(pTHX_ IV val = 0)
+        : value(aTHX_ newSViv(val)) {}
 };
 
 class unsigned_integer: public value {
 public:
-    unsigned_integer(tTHX aTHX, UV val = 0)
-        : value(aTHX, newSVuv(val)) {}
+    unsigned_integer(pTHX_ UV val = 0)
+        : value(aTHX_ newSVuv(val)) {}
 };
 
 class real: public value {
 public:
-    real(tTHX aTHX, NV val = .0)
-        : value(aTHX, newSVnv(val)) {}
+    real(pTHX_ NV val = .0)
+        : value(aTHX_ newSVnv(val)) {}
 };
 
 class string: public value {
 public:
     static const STRLEN INVALID = static_cast<STRLEN>(-1);
 public:
-    string(tTHX aTHX)
-        : value(aTHX, newSV(0)) {}
+    string(pTHX)
+        : value(aTHX_ newSV(0)) {}
 
-    string(tTHX aTHX, std::string const& val)
-        : value(aTHX, newSVpvn(val.data(), val.size())) {}
+    string(pTHX_ std::string const& val)
+        : value(aTHX_ newSVpvn(val.data(), val.size())) {}
 
-    string(tTHX aTHX, char const* ptr, STRLEN len = INVALID)
-        : value(aTHX, len == INVALID ? newSVpv(ptr, 0): newSVpvn(ptr, len)) {}
+    string(pTHX_ char const* ptr, STRLEN len = INVALID)
+        : value(aTHX_ len == INVALID ? newSVpv(ptr, 0): newSVpvn(ptr, len)) {}
 
     bool utf8() const {
         return SvUTF8(impl_);
@@ -192,9 +194,11 @@ public:
 
 namespace cxxs {
 
+#ifdef PERL_IMPLICIT_CONTEXT
 inline tTHX value::interpreter() const {
     return aTHX;
 }
+#endif
 
 inline value& value::mortal() {
     SvREFCNT_inc(impl_);
@@ -203,7 +207,7 @@ inline value& value::mortal() {
 }
 
 inline value value::clone() const {
-    return value(aTHX, newSVsv(impl_));
+    return value(aTHX_ newSVsv(impl_));
 }
 
 } // namespace cxxs

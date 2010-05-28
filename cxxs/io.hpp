@@ -9,7 +9,12 @@ namespace cxxs {
 
 struct perlio_streambuf: public std::basic_streambuf<char>
 {
-    perlio_streambuf(tTHX interp, PerlIO* io): aTHX(interp), io_(io) {}
+    perlio_streambuf(pTHX_ PerlIO* io)
+        :
+#ifdef PERL_IMPLICIT_CONTEXT
+        aTHX(aTHX),
+#endif
+        io_(io) {}
 
     virtual ~perlio_streambuf() {}
 
@@ -77,7 +82,9 @@ struct perlio_streambuf: public std::basic_streambuf<char>
     }
 
 protected:
+#ifdef PERL_IMPLICIT_CONTEXT
     tTHX aTHX;
+#endif
     PerlIO* io_;
 };
 

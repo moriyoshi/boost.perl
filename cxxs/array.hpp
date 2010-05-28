@@ -14,11 +14,11 @@ public:
     typedef value_base<array, AV> base_type;
 
 public:
-    array(tTHX aTHX)
-        : base_type(aTHX, newAV()) {}
+    array(pTHX)
+        : base_type(aTHX_ newAV()) {}
 
-    array(tTHX aTHX, AV* val, bool inc_ref = false)
-        : base_type(aTHX, val, inc_ref) {}
+    array(pTHX_ AV* val, bool inc_ref = false)
+        : base_type(aTHX_ val, inc_ref) {}
 
     array(array const& that): base_type(that) {}
 
@@ -37,11 +37,11 @@ public:
             throw new std::range_error(
                     (boost::format("Index out of range: %d") %  idx).str());
         }
-        return value(aTHX, *retval, true);
+        return value(aTHX_ *retval, true);
     }
 
     value operator[](I32 idx) {
-        return value(aTHX, *av_fetch(impl_, idx, 1), true);
+        return value(aTHX_ *av_fetch(impl_, idx, 1), true);
     }
 };
 

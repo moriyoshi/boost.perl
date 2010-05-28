@@ -8,8 +8,13 @@ namespace cxxs {
 
 template<typename T_, typename Timpl_>
 struct value_base {
-    value_base(tTHX interp, Timpl_* impl, bool inc_ref = false)
-            : aTHX(interp), impl_(impl) {
+    value_base(pTHX_ Timpl_* impl, bool inc_ref = false)
+        :
+#ifdef PERL_IMPLICIT_CONTEXT
+        aTHX(aTHX),
+#endif
+        impl_(impl)
+    {
         if (inc_ref)
             SvREFCNT_inc(impl_);
     }
@@ -24,7 +29,9 @@ struct value_base {
 
     tTHX interpreter() const;
 protected:
+#ifdef PERL_IMPLICIT_CONTEXT
     tTHX aTHX;
+#endif
     Timpl_* impl_;
 };
 

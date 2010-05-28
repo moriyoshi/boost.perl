@@ -10,8 +10,8 @@ public:
     typedef value_base<symbol, GV> base_type;
 
 public:
-    symbol(tTHX aTHX, GV* _gv, bool inc_ref = false)
-        : base_type(aTHX, _gv, inc_ref) {}
+    symbol(tTHX aTHX_ GV* _gv, bool inc_ref = false)
+        : base_type(aTHX_ _gv, inc_ref) {}
 
     symbol(symbol const& that): base_type(that) {} 
 };
